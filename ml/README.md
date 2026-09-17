@@ -8,7 +8,7 @@ Python 3.12. PyTorch publishes no wheels for 3.13 or 3.14 yet, so a newer interp
 
 ```bash
 brew install python@3.12
-/opt/homebrew/bin/python3.12 -m venv .venv
+"$(brew --prefix python@3.12)/bin/python3.12" -m venv .venv
 source .venv/bin/activate
 pip install -r ml/requirements.txt
 ```

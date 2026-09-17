@@ -2,7 +2,7 @@
 # venv built on a newer interpreter will fail at `pip install torch`.
 #
 #   brew install python@3.12
-#   /opt/homebrew/bin/python3.12 -m venv .venv
+#   "$(brew --prefix python@3.12)/bin/python3.12" -m venv .venv
 #   source .venv/bin/activate
 #   pip install -r ml/requirements.txt
 
