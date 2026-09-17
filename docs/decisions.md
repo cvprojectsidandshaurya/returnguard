@@ -7,10 +7,9 @@ Append only. Each entry: date, the decision, the alternatives, and why. If a dec
 | decision | options | owner | needed by |
 | --- | --- | --- | --- |
 | App framework | Expo (recommended) vs Flutter | | week 3, before the capture app |
-| Role split | who owns data plus eval, who owns models | | week 1 |
-| Rider phones | which budget Androids we buy or borrow | | week 1, blocks capture |
-| Image storage | Google Drive vs S3 | | week 1, blocks capture |
-| QR tag anchor in V1 | vision only vs vision plus printed tag | | week 6 |
+| Rider phones | which budget Androids we buy or borrow | Sid | week 1, blocks capture |
+| Image storage | Google Drive vs S3 | Sid | week 1, blocks capture |
+| QR tag anchor in V1 | vision only vs vision plus printed tag | Shaurya | week 6 |
 
 ## Decided
 
@@ -33,3 +32,11 @@ PyTorch publishes no wheels for 3.13 or 3.14 as of this date, confirmed by a fai
 ### 2026-09-16 Max pooling over packing shots as the multi view rule
 
 The score between a rider image and a garment is the max cosine over that garment's packing shots. It is the simplest version of CLAUDE.md section 4.5 and it is what the baseline uses. Mean pooling would punish a garment whose back view happens to be in the gallery when the rider photographed the front. The attention head over all pairs comes later and is measured against this.
+
+### 2026-09-16 Role split: Sid owns data and evaluation, Shaurya owns models
+
+Sid owns the capture protocol, the dataset, `metadata.csv`, the split tooling, the metrics, and every number that goes into `docs/results.md`. Shaurya owns the backbones, the training code, the loss and the hard negative sampling.
+
+The point is that the person reporting a result is not the person who tuned the model that produced it. When a model author also owns the eval script, thresholds drift toward whatever makes the current checkpoint look good, usually without anyone intending it. Keeping the split means an improvement has to survive a measurement neither author controls.
+
+Practical consequence: changes to `ml/src/metrics.py`, `ml/src/splits.py`, `ml/scripts/validate_metadata.py` and `docs/results.md` are Sid's call, and changes to training and backbone code are Shaurya's. Both still go through pull request review by the other.
