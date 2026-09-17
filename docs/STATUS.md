@@ -4,7 +4,7 @@ Last updated 2026-09-16. Keep this current. It is the first thing a new person o
 
 ## Done
 
-- GitHub org and public repo, `main` protected by the `protect-main` ruleset: pull request required, one approving review, no force push, no deletion. Nobody pushes to main, owners included.
+- Both members are org owners. GitHub org and public repo, `main` protected by the `protect-main` ruleset: pull request required, one approving review, no force push, no deletion. Nobody pushes to main, owners included.
 - Monorepo scaffolded: `ml`, `data`, `backend`, `docs`. No `/app`, the Expo vs Flutter decision is still open.
 - Capture protocol v1.0 frozen in `data/capture_protocol.md`. Shot lists, conditions, naming scheme, definition of done per garment.
 - Metadata schema in `data/metadata_schema.md`. `data/metadata.csv` and `data/phones.csv` exist with headers only.
@@ -13,14 +13,20 @@ Last updated 2026-09-16. Keep this current. It is the first thing a new person o
 
 Nothing has been photographed yet. `metadata.csv` is empty. No number in `docs/results.md` yet.
 
+## Who owns what
+
+Sid owns data and evaluation: the capture protocol, the dataset and `metadata.csv`, the split tooling, the metrics, and every number in `docs/results.md`.
+Shaurya owns models: backbones, training code, losses, and hard negative sampling.
+
+The person reporting a result is never the person who tuned the model that produced it. See `docs/decisions.md`.
+
 ## Left to do, in order
 
-1. Invite the second member to the org as an owner.
-2. Review and merge PR 1.
-3. Decide the image store, Google Drive or S3, create it, record the path in `docs/decisions.md`.
-4. Install Python 3.12 and build the venv. PyTorch has no wheels for 3.13 or 3.14.
-5. Photograph the first 30 garments against the capture protocol, filling `metadata.csv` in the same session.
-6. Run `make_splits.py`, then `validate_metadata.py`, then `eval_zero_shot.py` on both DINOv2 and CLIP. Add the row to `docs/results.md`.
+1. Review and merge PR 1.
+2. Decide the image store, Google Drive or S3, create it, record the path in `docs/decisions.md`.
+3. Install Python 3.12 and build the venv. PyTorch has no wheels for 3.13 or 3.14.
+4. Photograph the first 30 garments against the capture protocol, filling `metadata.csv` in the same session.
+5. Run `make_splits.py`, then `validate_metadata.py`, then `eval_zero_shot.py` on both DINOv2 and CLIP. Add the row to `docs/results.md`.
 
 That last step is the first real milestone. Everything after it is in `CLAUDE.md` section 9.
 
