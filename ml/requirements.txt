@@ -1,8 +1,16 @@
+# Python 3.12 is required. PyTorch has no wheels for 3.13 or 3.14 yet, so a
+# venv built on a newer interpreter will fail at `pip install torch`.
+#
+#   brew install python@3.12
+#   /opt/homebrew/bin/python3.12 -m venv .venv
+#   source .venv/bin/activate
+#   pip install -r ml/requirements.txt
+
 # Core
 torch>=2.4
 torchvision>=0.19
-numpy>=1.26
-pandas>=2.2
+numpy>=1.26,<3
+pandas>=2.2,<3
 pillow>=10.3
 scikit-learn>=1.5
 
@@ -16,3 +24,4 @@ matplotlib>=3.9
 
 # Tooling
 tqdm>=4.66
+pytest>=8.2
