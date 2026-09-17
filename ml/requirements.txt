@@ -1,0 +1,18 @@
+# Core
+torch>=2.4
+torchvision>=0.19
+numpy>=1.26
+pandas>=2.2
+pillow>=10.3
+scikit-learn>=1.5
+
+# Models
+transformers>=4.44
+open_clip_torch>=2.24
+
+# Notebooks and plots
+jupyterlab>=4.2
+matplotlib>=3.9
+
+# Tooling
+tqdm>=4.66
