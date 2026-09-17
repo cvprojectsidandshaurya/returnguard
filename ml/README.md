@@ -6,11 +6,20 @@ Notebooks are for exploration. Anything that produces a reported number is a scr
 
 Python 3.12. PyTorch publishes no wheels for 3.13 or 3.14 yet, so a newer interpreter fails at install time.
 
+On Apple Silicon, use the native arm64 Homebrew. If a Rosetta Homebrew is installed under `/usr/local`, plain `brew` may resolve to it, and an x86_64 venv silently caps torch at 2.2.2 and loses MPS. Check before you trust it:
+
 ```bash
-brew install python@3.12
-"$(brew --prefix python@3.12)/bin/python3.12" -m venv .venv
+file "$(brew --prefix python@3.12)/bin/python3.12"   # must say arm64
+```
+
+```bash
+/opt/homebrew/bin/brew install python@3.12
+/opt/homebrew/opt/python@3.12/bin/python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r ml/requirements.txt
+
+python -c "import torch, platform; print(platform.machine(), torch.__version__, torch.backends.mps.is_available())"
+# expect: arm64 2.x True
 ```
 
 ## Layout

@@ -33,3 +33,11 @@ PyTorch publishes no wheels for 3.13 or 3.14 as of this date, confirmed by a fai
 ### 2026-09-16 Max pooling over packing shots as the multi view rule
 
 The score between a rider image and a garment is the max cosine over that garment's packing shots. It is the simplest version of CLAUDE.md section 4.5 and it is what the baseline uses. Mean pooling would punish a garment whose back view happens to be in the gallery when the rider photographed the front. The attention head over all pairs comes later and is measured against this.
+
+### 2026-09-16 Native arm64 toolchain, MPS is the local accelerator
+
+The dev machine is an M4 Pro. It has two Homebrews, an x86_64 one at `/usr/local` and the native one at `/opt/homebrew`, and `which brew` resolves to the Rosetta one. A venv built from the Rosetta Python caps torch at 2.2.2, because PyTorch stopped shipping macOS x86_64 wheels after that, and reports no usable MPS. Building from `/opt/homebrew/opt/python@3.12` gives torch 2.14 with working MPS.
+
+Anyone setting up runs `file "$(brew --prefix python@3.12)/bin/python3.12"` and confirms it says arm64 before trusting the environment. The symptom otherwise is a confusing resolver error about torch versions that do not exist.
+
+Consequence for the plan: the week 7 to 9 fine tune can be attempted locally on MPS. Rented GPUs are a fallback, not a requirement.

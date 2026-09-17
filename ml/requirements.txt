@@ -1,8 +1,14 @@
-# Python 3.12 is required. PyTorch has no wheels for 3.13 or 3.14 yet, so a
-# venv built on a newer interpreter will fail at `pip install torch`.
+# Python 3.12. PyTorch has no wheels for 3.13 or 3.14, so a venv built on a
+# newer interpreter fails at `pip install torch`.
 #
-#   brew install python@3.12
-#   "$(brew --prefix python@3.12)/bin/python3.12" -m venv .venv
+# On Apple Silicon, build the venv with the NATIVE arm64 Homebrew python.
+# A Rosetta Homebrew under /usr/local caps torch at 2.2.2 and loses MPS, and
+# `which brew` may well point at it. Check with:
+#
+#   file "$(brew --prefix python@3.12)/bin/python3.12"   # must say arm64
+#
+#   /opt/homebrew/bin/brew install python@3.12
+#   /opt/homebrew/opt/python@3.12/bin/python3.12 -m venv .venv
 #   source .venv/bin/activate
 #   pip install -r ml/requirements.txt
 
