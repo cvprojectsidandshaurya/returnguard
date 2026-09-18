@@ -1,7 +1,37 @@
 # backend
 
-FastAPI inference server. Not started yet, it comes after the matching model has real numbers behind it. Milestone order is in CLAUDE.md section 9.
+FastAPI inference server for a calibrated ReturnGuard checkpoint.
 
-Planned surface: one endpoint that takes the packing image set and the rider image set for an order and returns MATCH, DIFFERENT_PRODUCT, SUSPICIOUS, or RETAKE, plus a score and the per check breakdown.
+The API is intentionally configuration-only. It will not start as ready until a
+trained checkpoint and a validation-fitted decision policy are supplied. Model
+weights and policies stay out of git.
 
-No secrets in code. Configuration comes from environment variables, see `.env.example` when it exists.
+```bash
+pip install -r backend/requirements.txt
+export RETURNGUARD_CHECKPOINT=/absolute/path/to/best.pt
+export RETURNGUARD_POLICY=/absolute/path/to/policy.json
+uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
+```
+
+`GET /health` reports whether both artifacts loaded. `POST /verify` accepts
+multipart lists named `packing_images` and `rider_images`. It returns RETAKE on
+an unreadable, undersized, dark, bright, or blurry capture; otherwise it returns
+the calibrated decision, global multi-view evidence, and optional local-detail
+evidence. Uploads are held only in an automatically deleted temporary directory.
+
+## Container deployment
+
+Build from the repository root after generating `best.pt` and `policy.json`.
+The image deliberately contains neither the photos nor model artifacts.
+
+```bash
+docker build -f backend/Dockerfile -t returnguard .
+docker run --rm -p 8000:8000 \
+  --env-file backend/.env.example \
+  -v "$PWD/ml/checkpoints:/artifacts:ro" \
+  returnguard
+```
+
+The mounted artifact directory must contain the exact checkpoint and policy
+named in the environment file. `GET /health` should return `{"ready": true}`
+before the service is connected to any client or load balancer.

@@ -114,3 +114,24 @@ python ml/scripts/match_local_features.py \
 The output reports the strongest packing/rider pair, the number of feature
 matches that survived the ratio test, and the RANSAC geometric-inlier count.
 Those are evidence values for later validation calibration, not a return verdict.
+
+## Calibrate deployment decisions
+
+After training, fit the decision policy on validation garments only. The script
+compares every rider set to every packing set in the validation split, then
+creates a strict MATCH threshold, a strict DIFFERENT_PRODUCT threshold, and an
+explicit SUSPICIOUS band between them.
+
+It refuses to write a deployment policy if either strict side recognizes fewer
+than half of its own validation examples. That is a safety stop, not a result to
+work around by lowering the threshold.
+
+```bash
+python ml/scripts/calibrate_decisions.py \
+  --image-root /absolute/path/to/returnguard-images \
+  --checkpoint ml/checkpoints/best.pt \
+  --out ml/checkpoints/policy.json
+```
+
+The resulting `policy.json` must ship with the exact checkpoint that produced
+it. Do not fit or adjust it using test-set comparisons.
