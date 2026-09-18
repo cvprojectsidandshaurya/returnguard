@@ -22,6 +22,7 @@ src/training_data.py paired examples and hard-negative batch sampler
 src/losses.py     symmetric cross-domain InfoNCE loss
 src/fine_tuned_embed.py checkpoint-backed embedding interface for inference
 src/quality.py    blur, brightness, and resolution capture-quality checks
+src/set_matching.py multi-view packing-versus-rider evidence scores
 src/metrics.py    TPR at 1% FPR, ROC AUC, Recall@k
 src/splits.py     connected components over design_id and lookalike_group
 scripts/          anything that produces a reported number
@@ -87,3 +88,12 @@ python ml/scripts/check_quality.py \
 The gate marks a photo for retake when it is undersized, too dark, too bright,
 or has low Laplacian variance. It does not claim that a garment is present;
 that requires the planned segmentation stage.
+
+## Multi-view evidence
+
+`src/set_matching.py` compares every rider embedding with every packing
+embedding. It returns the existing max-pair score plus the average and lower
+quartile of each rider image's best packing match. The latter two tell a future
+calibration step whether one clear photo is masking several contradictory ones.
+The module emits scores and the strongest image-pair indices only. It never
+assigns a return decision without validation-fitted thresholds.
