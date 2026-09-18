@@ -23,6 +23,7 @@ src/losses.py     symmetric cross-domain InfoNCE loss
 src/fine_tuned_embed.py checkpoint-backed embedding interface for inference
 src/quality.py    blur, brightness, and resolution capture-quality checks
 src/set_matching.py multi-view packing-versus-rider evidence scores
+src/local_features.py ORB plus RANSAC local-detail evidence matching
 src/metrics.py    TPR at 1% FPR, ROC AUC, Recall@k
 src/splits.py     connected components over design_id and lookalike_group
 scripts/          anything that produces a reported number
@@ -97,3 +98,19 @@ quartile of each rider image's best packing match. The latter two tell a future
 calibration step whether one clear photo is masking several contradictory ones.
 The module emits scores and the strongest image-pair indices only. It never
 assigns a return decision without validation-fitted thresholds.
+
+## Local-detail evidence
+
+For tags, logos, embroidery, and rigid print patches, use the ORB plus RANSAC
+baseline to find geometrically consistent local matches. It is most useful when
+the global embedding is uncertain, not on uniform or heavily occluded fabric.
+
+```bash
+python ml/scripts/match_local_features.py \
+  --packing /path/to/packing-01.jpg /path/to/packing-02.jpg \
+  --rider /path/to/rider-01.jpg /path/to/rider-02.jpg
+```
+
+The output reports the strongest packing/rider pair, the number of feature
+matches that survived the ratio test, and the RANSAC geometric-inlier count.
+Those are evidence values for later validation calibration, not a return verdict.
