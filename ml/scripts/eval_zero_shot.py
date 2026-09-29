@@ -29,6 +29,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.embed import Embedder  # noqa: E402
+from src.fine_tuned_embed import FineTunedEmbedder  # noqa: E402
 from src.metrics import recall_at_k, verification  # noqa: E402
 
 CONDITIONS = {
@@ -89,7 +90,8 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--metadata", default="data/metadata.csv")
     parser.add_argument("--image-root", required=True, help="root of the image store, never inside the repo")
-    parser.add_argument("--backbone", default="dinov2_base")
+    parser.add_argument("--backbone", default="dinov2_base", help="frozen backbone; ignored when --checkpoint is supplied")
+    parser.add_argument("--checkpoint", type=Path, help="fine-tuned checkpoint evaluated with this held-out protocol")
     parser.add_argument("--split", default="test", help="split to evaluate, or 'all' while the dataset is tiny")
     parser.add_argument("--device", default="auto")
     parser.add_argument("--batch-size", type=int, default=16)
@@ -118,29 +120,32 @@ def main() -> int:
         print("need both packing and rider shots in the split")
         return 1
 
-    garments = sorted(packing["garment_id"].unique())
-    garment_to_idx = {g: i for i, g in enumerate(garments)}
+    if "unit_id" not in df.columns or df["unit_id"].astype(str).str.strip().eq("").any():
+        raise ValueError("unit_id must be populated to evaluate the unit-identity model")
+    units = sorted(packing["unit_id"].unique())
+    unit_to_idx = {unit: index for index, unit in enumerate(units)}
 
-    # Rider shots of a garment with no packing shots in this split cannot be scored.
-    rider = rider[rider["garment_id"].isin(garment_to_idx)].reset_index(drop=True)
+    # Rider shots of a unit with no packing shots in this split cannot be scored.
+    rider = rider[rider["unit_id"].isin(unit_to_idx)].reset_index(drop=True)
     if rider.empty:
-        print("no rider shots have a matching gallery garment in this split")
+        print("no rider shots have a matching gallery unit in this split")
         return 1
 
     root = Path(args.image_root)
-    print(f"backbone={args.backbone} split={args.split} garments={len(garments)} "
+    model_name = f"checkpoint:{args.checkpoint.name}" if args.checkpoint else f"{args.backbone} zero shot"
+    print(f"model={model_name} identity_policy=unit split={args.split} units={len(units)} "
           f"gallery={len(packing)} queries={len(rider)}")
 
-    embedder = Embedder(args.backbone, device=args.device)
+    embedder = FineTunedEmbedder(args.checkpoint, device=args.device) if args.checkpoint else Embedder(args.backbone, device=args.device)
     print(f"device={embedder.device}, embedding {len(packing) + len(rider)} images")
 
     gallery_vecs = embedder.encode([root / p for p in packing["relative_path"]], args.batch_size)
     query_vecs = embedder.encode([root / p for p in rider["relative_path"]], args.batch_size)
 
-    gallery_garment_idx = packing["garment_id"].map(garment_to_idx).to_numpy()
-    correct_index = rider["garment_id"].map(garment_to_idx).to_numpy()
+    gallery_garment_idx = packing["unit_id"].map(unit_to_idx).to_numpy()
+    correct_index = rider["unit_id"].map(unit_to_idx).to_numpy()
 
-    scores = score_matrix(query_vecs, gallery_vecs, gallery_garment_idx, len(garments))
+    scores = score_matrix(query_vecs, gallery_vecs, gallery_garment_idx, len(units))
     overall = evaluate(scores, correct_index)
 
     breakdown = {}
@@ -162,10 +167,10 @@ def main() -> int:
     for key, value in breakdown.items():
         print(f"  {key:24s} R@1={fmt(value['recall_at_1'])}  TPR@1%FPR={fmt(value['tpr_at_1pct_fpr'])}  n={value['n_queries']}")
 
-    row = (f"| {date.today()} | {commit} | {version} | {args.backbone} zero shot | "
+    row = (f"| {date.today()} | {commit} | {version} | {model_name} | "
            f"split={args.split} seed={args.seed} maxpool | {fmt(overall['tpr_at_1pct_fpr'])} | "
            f"{fmt(overall['recall_at_1'])} | {fmt(overall['recall_at_5'])} | n/a | "
-           f"{len(garments)} garments, {overall['n_queries']} queries |")
+           f"{len(units)} units, {overall['n_queries']} queries |")
     print(f"\nrow for docs/results.md:\n{row}")
 
     if args.no_write:
@@ -173,14 +178,15 @@ def main() -> int:
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"{date.today()}-{commit}-{args.backbone}.md"
+    safe_model_name = (args.checkpoint.stem if args.checkpoint else args.backbone).replace("/", "-")
+    out_path = out_dir / f"{date.today()}-{commit}-{safe_model_name}.md"
     lines = [
-        f"# {args.backbone} zero shot, {date.today()}",
+        f"# {model_name}, {date.today()}",
         "",
         f"commit `{commit}`, data `{version}`, split `{args.split}`, seed `{args.seed}`",
         "",
-        "Rider shots as queries, packing shots as gallery, max cosine over each garment's packing shots.",
-        "No segmentation, no fine tuning, no fusion.",
+        "Rider shots as queries, packing shots as gallery, max cosine over each physical unit's packing shots.",
+        "No segmentation or score fusion. Fine tuning is used only when --checkpoint is supplied.",
         "",
         "## Overall",
         "",

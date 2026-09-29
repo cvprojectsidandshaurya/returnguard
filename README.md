@@ -1,6 +1,6 @@
 # ReturnGuard
 
-Computer vision verification for ecommerce returns in India. The seller photographs a garment at packing. The delivery rider photographs it at the doorstep during the existing reverse pickup QC step. Our model compares the two sets and reports MATCH, DIFFERENT_PRODUCT, SUSPICIOUS, or RETAKE.
+Computer vision verification for ecommerce returns in India. The seller photographs a garment at packing. The delivery rider photographs it at the doorstep during the existing reverse pickup QC step. Our model verifies a physical `unit_id` and reports MATCH, DIFFERENT_UNIT, SUSPICIOUS, RETAKE, or REFERENCE_INVALID.
 
 The research problem is the domain gap: clean flat lay packing shots against crumpled, glare covered, motion blurred rider photos taken on cheap Android phones.
 
@@ -24,7 +24,7 @@ The research problem is the domain gap: clean flat lay packing shots against cru
 ## Hard rules
 
 - No images, weights, or datasets in git. Photos live in shared storage, git holds `data/metadata.csv` only.
-- Splits are by `garment_id` and `design_id`, never by image.
+- Splits are by physical unit and `design_id`, never by image.
 - Every reported number comes from a script with a fixed seed and a recorded commit hash.
 - Zero-shot baselines are reported alongside any fine-tuned model.
 - Headline metrics are TPR at 1% FPR and Recall@1, with per-condition breakdowns.
