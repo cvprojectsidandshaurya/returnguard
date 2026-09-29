@@ -11,11 +11,15 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import FastAPI, File, HTTPException, Response, UploadFile
+from starlette.concurrency import run_in_threadpool
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "ml"))
+from src.quality import QualityThresholds  # noqa: E402
 from src.verifier import ReturnVerifier  # noqa: E402
 
 MAX_IMAGE_BYTES = 12 * 1024 * 1024
+MAX_PACKING_IMAGES = 8
+MAX_RIDER_IMAGES = 12
 
 
 @dataclass
@@ -27,10 +31,19 @@ class Runtime:
 def load_runtime() -> Runtime:
     checkpoint = os.getenv("RETURNGUARD_CHECKPOINT")
     policy = os.getenv("RETURNGUARD_POLICY")
-    if not checkpoint or not policy:
-        return Runtime(None, "RETURNGUARD_CHECKPOINT and RETURNGUARD_POLICY must both be configured")
+    quality_policy = os.getenv("RETURNGUARD_QUALITY_POLICY")
+    if not checkpoint or not policy or not quality_policy:
+        return Runtime(None, "RETURNGUARD_CHECKPOINT, RETURNGUARD_POLICY, and RETURNGUARD_QUALITY_POLICY must all be configured")
     try:
-        return Runtime(ReturnVerifier.from_artifacts(checkpoint, policy, device=os.getenv("RETURNGUARD_DEVICE", "auto")), None)
+        return Runtime(
+            ReturnVerifier.from_artifacts(
+                checkpoint,
+                policy,
+                device=os.getenv("RETURNGUARD_DEVICE", "auto"),
+                quality_thresholds=QualityThresholds.load(quality_policy),
+            ),
+            None,
+        )
     except Exception as exc:
         return Runtime(None, f"could not load model artifacts: {exc}")
 
@@ -75,12 +88,17 @@ async def verify(
         raise HTTPException(status_code=503, detail=runtime.error or "model is unavailable")
     if not packing_images or not rider_images:
         raise HTTPException(status_code=422, detail="at least one packing image and one rider image are required")
+    if len(packing_images) > MAX_PACKING_IMAGES:
+        raise HTTPException(status_code=422, detail=f"at most {MAX_PACKING_IMAGES} packing images are allowed")
+    if len(rider_images) > MAX_RIDER_IMAGES:
+        raise HTTPException(status_code=422, detail=f"at most {MAX_RIDER_IMAGES} rider images are allowed")
     try:
         with tempfile.TemporaryDirectory(prefix="returnguard-") as temp:
             directory = Path(temp)
             packing = [await save_upload(upload, directory, "packing", index) for index, upload in enumerate(packing_images)]
             rider = [await save_upload(upload, directory, "rider", index) for index, upload in enumerate(rider_images)]
-            return runtime.verifier.verify(packing, rider).as_dict()
+            result = await run_in_threadpool(runtime.verifier.verify, packing, rider)
+            return result.as_dict()
     finally:
         for upload in [*packing_images, *rider_images]:
             await upload.close()

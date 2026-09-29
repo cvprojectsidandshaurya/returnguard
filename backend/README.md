@@ -3,21 +3,24 @@
 FastAPI inference server for a calibrated ReturnGuard checkpoint.
 
 The API is intentionally configuration-only. It will not start as ready until a
-trained checkpoint and a validation-fitted decision policy are supplied. Model
-weights and policies stay out of git.
+trained checkpoint, a validation-fitted decision policy, and a fitted quality
+policy are supplied. Model weights and policies stay out of git.
 
 ```bash
 pip install -r backend/requirements.txt
 export RETURNGUARD_CHECKPOINT=/absolute/path/to/best.pt
 export RETURNGUARD_POLICY=/absolute/path/to/policy.json
+export RETURNGUARD_QUALITY_POLICY=/absolute/path/to/quality-policy.json
 uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
 ```
 
 `GET /health` reports whether both artifacts loaded. `POST /verify` accepts
-multipart lists named `packing_images` and `rider_images`. It returns RETAKE on
-an unreadable, undersized, dark, bright, or blurry capture; otherwise it returns
-the calibrated decision, global multi-view evidence, and optional local-detail
-evidence. Uploads are held only in an automatically deleted temporary directory.
+multipart lists named `packing_images` and `rider_images` (at most 8 and 12
+respectively). A poor rider image returns RETAKE; a poor seller reference returns
+REFERENCE_INVALID. Otherwise it returns the calibrated decision, global
+multi-view evidence, and optional local-detail evidence. Uploads are held only
+in an automatically deleted temporary directory. Put the service behind the
+deployment platform's authentication and rate limit before exposing it publicly.
 
 ## Container deployment
 

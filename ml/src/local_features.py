@@ -39,6 +39,12 @@ class BestLocalMatch:
         return result
 
 
+@dataclass(frozen=True)
+class LocalFeatures:
+    keypoints: tuple
+    descriptors: np.ndarray | None
+
+
 def _read_gray(path: Path, max_side: int = 1600) -> np.ndarray:
     image = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
     if image is None:
@@ -54,16 +60,28 @@ def _empty_score(reference_keypoints: int, query_keypoints: int) -> LocalMatchSc
     return LocalMatchScore(reference_keypoints, query_keypoints, 0, 0, 0.0)
 
 
+def extract_local_features(image: np.ndarray) -> LocalFeatures:
+    """Extract ORB once per image; callers may reuse it across pairings."""
+    if image.ndim != 2:
+        raise ValueError("extract_local_features expects a grayscale image")
+    detector = cv2.ORB_create(nfeatures=2_000, fastThreshold=10)
+    keypoints, descriptors = detector.detectAndCompute(image, None)
+    return LocalFeatures(tuple(keypoints), descriptors)
+
+
 def score_local_features(reference: np.ndarray, query: np.ndarray, ratio_threshold: float = 0.75) -> LocalMatchScore:
     """Match two grayscale images with ORB, a ratio test, and RANSAC homography."""
     if not 0.0 < ratio_threshold < 1.0:
         raise ValueError("ratio_threshold must be between zero and one")
-    if reference.ndim != 2 or query.ndim != 2:
-        raise ValueError("reference and query must be grayscale images")
+    return score_extracted_features(extract_local_features(reference), extract_local_features(query), ratio_threshold)
 
-    detector = cv2.ORB_create(nfeatures=2_000, fastThreshold=10)
-    reference_keypoints, reference_descriptors = detector.detectAndCompute(reference, None)
-    query_keypoints, query_descriptors = detector.detectAndCompute(query, None)
+
+def score_extracted_features(reference: LocalFeatures, query: LocalFeatures, ratio_threshold: float = 0.75) -> LocalMatchScore:
+    """Score precomputed ORB features with a ratio test and RANSAC homography."""
+    if not 0.0 < ratio_threshold < 1.0:
+        raise ValueError("ratio_threshold must be between zero and one")
+    reference_keypoints, reference_descriptors = reference.keypoints, reference.descriptors
+    query_keypoints, query_descriptors = query.keypoints, query.descriptors
     if reference_descriptors is None or query_descriptors is None:
         return _empty_score(len(reference_keypoints), len(query_keypoints))
 
@@ -93,10 +111,12 @@ def best_local_match(packing_paths: list[Path], rider_paths: list[Path], ratio_t
     """Return the strongest geometric local match across two image sets."""
     if not packing_paths or not rider_paths:
         raise ValueError("packing_paths and rider_paths must both be non-empty")
+    packing_features = [extract_local_features(_read_gray(path)) for path in packing_paths]
+    rider_features = [extract_local_features(_read_gray(path)) for path in rider_paths]
     best: BestLocalMatch | None = None
-    for packing_index, packing in enumerate(packing_paths):
-        for rider_index, rider in enumerate(rider_paths):
-            score = score_local_paths(packing, rider, ratio_threshold)
+    for packing_index, packing in enumerate(packing_features):
+        for rider_index, rider in enumerate(rider_features):
+            score = score_extracted_features(packing, rider, ratio_threshold)
             candidate = BestLocalMatch(packing_index, rider_index, score)
             if best is None or (score.geometric_inliers, score.inlier_ratio) > (best.score.geometric_inliers, best.score.inlier_ratio):
                 best = candidate

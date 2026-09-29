@@ -37,6 +37,7 @@ class ReturnVerifier:
         policy: DecisionPolicy,
         quality_thresholds: QualityThresholds = QualityThresholds(),
     ) -> None:
+        policy.assert_deployable()
         self.embedder = embedder
         self.policy = policy
         self.quality_thresholds = quality_thresholds
@@ -66,8 +67,14 @@ class ReturnVerifier:
                 except Exception as exc:
                     quality[key] = {"passed": False, "retake_reasons": [f"unreadable_image: {exc}"]}
                     retake_reasons.append(f"{key}:unreadable_image")
-        if retake_reasons:
-            return VerificationResult("RETAKE", None, self.policy.score_field, tuple(retake_reasons), quality, None, None)
+        packing_failures = [reason for reason in retake_reasons if reason.startswith("packing_")]
+        rider_failures = [reason for reason in retake_reasons if reason.startswith("rider_")]
+        if packing_failures:
+            return VerificationResult(
+                "REFERENCE_INVALID", None, self.policy.score_field, tuple(packing_failures), quality, None, None
+            )
+        if rider_failures:
+            return VerificationResult("RETAKE", None, self.policy.score_field, tuple(rider_failures), quality, None, None)
 
         packing_embeddings = self.embedder.encode(packing_paths)
         rider_embeddings = self.embedder.encode(rider_paths)

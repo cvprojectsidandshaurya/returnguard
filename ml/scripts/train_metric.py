@@ -27,6 +27,7 @@ from torchvision import transforms
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.losses import symmetric_infonce  # noqa: E402
 from src.metric_model import DinoMetricModel  # noqa: E402
+from src.metrics import recall_at_k, verification  # noqa: E402
 from src.training_data import (  # noqa: E402
     CrossDomainPairDataset,
     HardNegativeBatchSampler,
@@ -86,6 +87,46 @@ def validation_loss(model, loader, device: str, temperature: float) -> float:
     return float(np.mean(losses)) if losses else float("nan")
 
 
+@torch.no_grad()
+def validation_retrieval(model, metadata, image_root: Path, device: str, batch_size: int) -> dict[str, float]:
+    """Measure deploy-shaped unit retrieval on validation data each epoch."""
+    val = metadata[metadata["split"] == "val"]
+    packing = val[val["shot_type"] == "packing"].reset_index(drop=True)
+    rider = val[val["shot_type"] == "rider"].reset_index(drop=True)
+    units = sorted(packing["unit_id"].unique())
+    unit_to_index = {unit: index for index, unit in enumerate(units)}
+    rider = rider[rider["unit_id"].isin(unit_to_index)].reset_index(drop=True)
+    if not units or rider.empty:
+        raise ValueError("validation retrieval needs packing and rider images for at least one unit")
+
+    def encode(paths: list[Path]) -> np.ndarray:
+        vectors: list[np.ndarray] = []
+        model.eval()
+        for start in range(0, len(paths), batch_size):
+            images = []
+            for path in paths[start : start + batch_size]:
+                with Image.open(path) as image:
+                    images.append(image.convert("RGB"))
+            pixels = model.processor(images=images, return_tensors="pt")["pixel_values"].to(device)
+            vectors.append(model(pixels).cpu().numpy())
+        return np.concatenate(vectors, axis=0).astype(np.float32)
+
+    gallery = encode([image_root / path for path in packing["relative_path"]])
+    queries = encode([image_root / path for path in rider["relative_path"]])
+    similarities = queries @ gallery.T
+    gallery_units = packing["unit_id"].map(unit_to_index).to_numpy()
+    scores = np.full((len(queries), len(units)), -np.inf, dtype=np.float32)
+    for unit_index in range(len(units)):
+        columns = np.where(gallery_units == unit_index)[0]
+        scores[:, unit_index] = similarities[:, columns].max(axis=1)
+    correct = rider["unit_id"].map(unit_to_index).to_numpy()
+    result = recall_at_k(scores, correct, ks=(1, 5))
+    labels = np.zeros_like(scores, dtype=np.int8)
+    labels[np.arange(len(correct)), correct] = 1
+    result.update(verification(labels.reshape(-1), scores.reshape(-1)))
+    return {key: float(value) for key, value in result.items()}
+
+
 def metadata_digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()[:12]
 
@@ -102,6 +143,7 @@ def main() -> int:
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--temperature", type=float, default=0.07)
+    parser.add_argument("--selection-metric", choices=("recall_at_1", "tpr_at_1pct_fpr"), default="recall_at_1")
     parser.add_argument("--seed", type=int, default=13)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--save-dir", default="ml/checkpoints")
@@ -136,13 +178,14 @@ def main() -> int:
         **vars(args),
         "device": device,
         "metadata_sha256_12": metadata_digest(metadata_path),
-        "train_garments": len(train_data),
-        "val_garments": len(val_data),
+        "identity_policy": "unit",
+        "train_units": len(train_data),
+        "val_units": len(val_data),
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
     print(json.dumps(run, sort_keys=True))
 
-    best_val = float("inf")
+    best_selection = float("-inf")
     for epoch in range(args.epochs):
         model.train()
         train_data.set_epoch(epoch)
@@ -157,16 +200,27 @@ def main() -> int:
             losses.append(float(loss.item()))
 
         val = validation_loss(model, val_loader, device, args.temperature)
+        retrieval = validation_retrieval(model, df, image_root, device, args.batch_size)
+        selection = retrieval[args.selection_metric]
+        if not np.isfinite(selection):
+            raise ValueError(f"validation {args.selection_metric} is not finite; inspect the validation split")
         scheduler.step()
-        result = {"epoch": epoch + 1, "train_loss": float(np.mean(losses)), "val_loss": val}
+        result = {
+            "epoch": epoch + 1,
+            "train_loss": float(np.mean(losses)),
+            "val_loss": val,
+            **retrieval,
+            "selection_metric": args.selection_metric,
+            "selection_value": selection,
+        }
         print(json.dumps(result, sort_keys=True))
-        payload = {"model": model.state_dict(), "run": run, "epoch": epoch + 1, "val_loss": val}
+        payload = {"model": model.state_dict(), "run": run, "epoch": epoch + 1, **result}
         torch.save(payload, save_dir / "last.pt")
-        if val < best_val:
-            best_val = val
+        if selection > best_selection:
+            best_selection = selection
             torch.save(payload, save_dir / "best.pt")
 
-    print(f"saved best checkpoint to {save_dir / 'best.pt'} (validation loss {best_val:.4f})")
+    print(f"saved best checkpoint to {save_dir / 'best.pt'} ({args.selection_metric} {best_selection:.4f})")
     return 0
 
 

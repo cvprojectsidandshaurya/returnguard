@@ -8,6 +8,7 @@ segmentation/detector stage.
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -17,13 +18,25 @@ from PIL import Image
 
 @dataclass(frozen=True)
 class QualityThresholds:
-    """Thresholds should be fitted on captured validation photos, not guessed."""
+    """Thresholds should be fitted on captured validation photos, not guessed.
+
+    Sharpness and brightness are measured after a deterministic downscale so a
+    phone's native resolution does not change the meaning of their thresholds.
+    """
 
     min_width: int = 320
     min_height: int = 320
     min_brightness: float = 35.0
     max_brightness: float = 235.0
     min_laplacian_variance: float = 40.0
+    measurement_max_side: int = 768
+
+    def save(self, path: Path | str) -> None:
+        Path(path).write_text(json.dumps(asdict(self), indent=2) + "\n")
+
+    @classmethod
+    def load(cls, path: Path | str) -> "QualityThresholds":
+        return cls(**json.loads(Path(path).read_text()))
 
 
 @dataclass(frozen=True)
@@ -64,7 +77,11 @@ def laplacian_variance(gray: np.ndarray) -> float:
 def assess_image(image: Image.Image, thresholds: QualityThresholds = QualityThresholds()) -> QualityResult:
     """Return measurements and retake reasons for one image."""
     width, height = image.size
-    gray = _grayscale(image)
+    measurement = image
+    if max(width, height) > thresholds.measurement_max_side:
+        scale = thresholds.measurement_max_side / max(width, height)
+        measurement = image.resize((round(width * scale), round(height * scale)), Image.Resampling.LANCZOS)
+    gray = _grayscale(measurement)
     brightness = float(gray.mean())
     sharpness = laplacian_variance(gray)
     reasons: list[str] = []

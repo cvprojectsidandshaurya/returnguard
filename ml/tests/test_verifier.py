@@ -24,10 +24,10 @@ class DummyEmbedder:
 
 
 def _policy() -> DecisionPolicy:
-    return DecisionPolicy("mean_rider_score", 0.25, 0.75, 0.01, 0.01, 10, 10, 1.0, 1.0)
+    return DecisionPolicy("mean_rider_score", "unit", 0.25, 0.75, 0.01, 0.01, 10, 10, 1.0, 1.0, True)
 
 
-def test_retake_short_circuits_embedding(monkeypatch):
+def test_invalid_packing_reference_short_circuits_embedding(monkeypatch):
     embedder = DummyEmbedder()
     monkeypatch.setattr(
         verifier_module,
@@ -35,9 +35,23 @@ def test_retake_short_circuits_embedding(monkeypatch):
         lambda *_: QualityResult(100, 100, 100.0, 0.0, False, ("resolution_too_low",)),
     )
     result = ReturnVerifier(embedder, _policy()).verify([Path("packing.jpg")], [Path("rider.jpg")])
-    assert result.decision == "RETAKE"
+    assert result.decision == "REFERENCE_INVALID"
     assert embedder.calls == 0
-    assert result.retake_reasons == ("packing_0:resolution_too_low", "rider_0:resolution_too_low")
+    assert result.retake_reasons == ("packing_0:resolution_too_low",)
+
+
+def test_rider_quality_failure_requests_a_retake(monkeypatch):
+    embedder = DummyEmbedder()
+    monkeypatch.setattr(
+        verifier_module,
+        "assess_path",
+        lambda path, *_: QualityResult(100, 100, 100.0, 0.0, False, ("resolution_too_low",))
+        if "rider" in str(path)
+        else QualityResult(500, 500, 120.0, 100.0, True, ()),
+    )
+    result = ReturnVerifier(embedder, _policy()).verify([Path("packing.jpg")], [Path("rider.jpg")])
+    assert result.decision == "RETAKE"
+    assert result.retake_reasons == ("rider_0:resolution_too_low",)
 
 
 def test_verified_images_use_calibrated_multi_view_score(monkeypatch):

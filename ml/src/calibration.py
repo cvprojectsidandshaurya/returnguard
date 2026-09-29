@@ -1,8 +1,8 @@
-"""Validation-only policy fitting for return decisions.
+"""Validation-only policy fitting for physical-unit return decisions.
 
 Training produces similarity evidence, not a fraud label.  This module is the
 only place that maps a validated score to MATCH, SUSPICIOUS, or
-DIFFERENT_PRODUCT.  RETAKE is reserved for the capture-quality gate.
+DIFFERENT_UNIT.  RETAKE is reserved for a rider capture-quality failure.
 """
 
 from __future__ import annotations
@@ -14,7 +14,8 @@ from pathlib import Path
 import numpy as np
 
 SCORE_FIELDS = {"max_pair_score", "mean_rider_score", "lower_quartile_rider_score"}
-DECISIONS = {"MATCH", "SUSPICIOUS", "DIFFERENT_PRODUCT", "RETAKE"}
+IDENTITY_POLICIES = {"unit"}
+DECISIONS = {"MATCH", "SUSPICIOUS", "DIFFERENT_UNIT", "RETAKE", "REFERENCE_INVALID"}
 
 
 @dataclass(frozen=True)
@@ -22,7 +23,8 @@ class DecisionPolicy:
     """A serialisable policy fitted only from validation-set comparison scores."""
 
     score_field: str
-    different_product_threshold: float
+    identity_policy: str
+    different_unit_threshold: float
     match_threshold: float
     target_match_false_positive_rate: float
     target_different_false_reject_rate: float
@@ -30,27 +32,38 @@ class DecisionPolicy:
     negative_examples: int
     observed_match_true_positive_rate: float
     observed_different_true_negative_rate: float
-    version: int = 1
+    is_deployable: bool
+    version: int = 2
 
     def __post_init__(self) -> None:
         if self.score_field not in SCORE_FIELDS:
             raise ValueError(f"unknown score field {self.score_field!r}")
-        if self.different_product_threshold >= self.match_threshold:
-            raise ValueError("policy needs a non-empty suspicious band")
+        if self.identity_policy not in IDENTITY_POLICIES:
+            raise ValueError(f"unknown identity policy {self.identity_policy!r}")
+        if not np.isfinite((self.different_unit_threshold, self.match_threshold)).all():
+            raise ValueError("policy thresholds must be finite")
+        if self.different_unit_threshold > self.match_threshold:
+            raise ValueError("different-unit threshold may not exceed match threshold")
         if not 0.0 < self.target_match_false_positive_rate < 1.0:
             raise ValueError("target_match_false_positive_rate must be between zero and one")
         if not 0.0 < self.target_different_false_reject_rate < 1.0:
             raise ValueError("target_different_false_reject_rate must be between zero and one")
-        if self.observed_match_true_positive_rate < 0.5 or self.observed_different_true_negative_rate < 0.5:
-            raise ValueError("validation discrimination is too weak to deploy this policy")
+    def assert_deployable(self) -> None:
+        """Refuse inference for an artifact that calibration marked unsafe."""
+        if not self.is_deployable:
+            raise ValueError(
+                "calibration policy is not deployable; collect more validation data or improve separation before serving it"
+            )
+        if self.different_unit_threshold >= self.match_threshold:
+            raise ValueError("deployable policy needs a non-empty suspicious band")
 
     def decide(self, score: float) -> str:
         if not np.isfinite(score):
             raise ValueError("score must be finite")
         if score >= self.match_threshold:
             return "MATCH"
-        if score <= self.different_product_threshold:
-            return "DIFFERENT_PRODUCT"
+        if score <= self.different_unit_threshold:
+            return "DIFFERENT_UNIT"
         return "SUSPICIOUS"
 
     def as_dict(self) -> dict:
@@ -66,12 +79,14 @@ class DecisionPolicy:
 
 def fit_decision_policy(
     scores: np.ndarray,
-    same_product: np.ndarray,
+    same_unit: np.ndarray,
     score_field: str = "mean_rider_score",
     target_match_false_positive_rate: float = 0.01,
     target_different_false_reject_rate: float = 0.01,
+    min_positive_examples: int = 2,
+    min_negative_examples: int = 2,
 ) -> DecisionPolicy:
-    """Fit strict MATCH and DIFFERENT_PRODUCT thresholds from validation scores.
+    """Fit strict MATCH and DIFFERENT_UNIT thresholds from validation scores.
 
     A non-matching return must score above the match threshold no more than the
     configured false-positive budget.  A genuine return must score below the
@@ -79,13 +94,15 @@ def fit_decision_policy(
     between the two is deliberately routed to review instead of being guessed.
     """
     values = np.asarray(scores, dtype=float)
-    labels = np.asarray(same_product, dtype=bool)
+    labels = np.asarray(same_unit, dtype=bool)
     if values.ndim != 1 or labels.ndim != 1 or len(values) != len(labels):
-        raise ValueError("scores and same_product must be equally sized one-dimensional arrays")
+        raise ValueError("scores and same_unit must be equally sized one-dimensional arrays")
     if not np.isfinite(values).all():
         raise ValueError("scores must be finite")
     positives = values[labels]
     negatives = values[~labels]
+    if min_positive_examples < 2 or min_negative_examples < 2:
+        raise ValueError("minimum calibration counts must each be at least two")
     if len(positives) < 2 or len(negatives) < 2:
         raise ValueError("need at least two positive and two negative validation comparisons")
 
@@ -100,9 +117,17 @@ def fit_decision_policy(
     match_threshold = max(negative_ceiling, positive_floor)
     match_tpr = float((positives >= match_threshold).mean())
     different_tnr = float((negatives <= different_threshold).mean())
+    deployable = (
+        len(positives) >= min_positive_examples
+        and len(negatives) >= min_negative_examples
+        and match_tpr >= 0.5
+        and different_tnr >= 0.5
+        and different_threshold < match_threshold
+    )
     return DecisionPolicy(
         score_field=score_field,
-        different_product_threshold=different_threshold,
+        identity_policy="unit",
+        different_unit_threshold=different_threshold,
         match_threshold=match_threshold,
         target_match_false_positive_rate=target_match_false_positive_rate,
         target_different_false_reject_rate=target_different_false_reject_rate,
@@ -110,4 +135,5 @@ def fit_decision_policy(
         negative_examples=int(len(negatives)),
         observed_match_true_positive_rate=match_tpr,
         observed_different_true_negative_rate=different_tnr,
+        is_deployable=deployable,
     )

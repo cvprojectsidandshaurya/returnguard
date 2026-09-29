@@ -57,9 +57,11 @@ Rider shots are queries, packing shots are the gallery. The score between a ride
 Run metadata validation and the frozen baselines first. Training uses one
 packing photo and one rider photo for each physical garment in a batch. It
 learns a shared embedding with symmetric InfoNCE: the diagonal is the positive
-pair and all off-diagonal entries are negatives. The sampler keeps garment IDs
-unique within a batch and, whenever the data permits, places an identical
-design or lookalike in the same batch as a hard negative.
+pair and all off-diagonal entries are negatives. ReturnGuard's current identity
+policy is explicitly **physical unit**: `unit_id` is the positive identity, and
+different units with an identical `design_id` are intentional hard negatives.
+The sampler keeps unit IDs unique within a batch and, whenever the data permits,
+places an identical design or lookalike in the same batch as a hard negative.
 
 ```bash
 python ml/scripts/validate_metadata.py
@@ -68,11 +70,18 @@ python ml/scripts/train_metric.py \
   --backbone dinov2_base --epochs 20 --batch-size 16
 ```
 
-The script uses only the train split for optimisation and validation loss to
-select a checkpoint. It never fits thresholds or emits test metrics. Checkpoints
-go under `ml/checkpoints/`, which is ignored by git. Once a checkpoint is
-selected, the evaluation owner should run the held-out retrieval and
-verification evaluation with thresholds fitted on validation data only.
+The script uses only the train split for optimisation. Each epoch reports
+validation Recall@1 and TPR@1% FPR, and selects the checkpoint on validation
+Recall@1 by default (use `--selection-metric tpr_at_1pct_fpr` when that is the
+agreed headline). It never fits thresholds or emits test metrics. Checkpoints
+go under `ml/checkpoints/`, which is ignored by git. The evaluation owner then
+runs the exact same held-out protocol against the selected checkpoint:
+
+```bash
+python ml/scripts/eval_zero_shot.py \
+  --image-root /absolute/path/to/returnguard-images \
+  --checkpoint ml/checkpoints/best.pt --split test
+```
 
 ## Capture-quality gate
 
@@ -89,6 +98,17 @@ python ml/scripts/check_quality.py \
 The gate marks a photo for retake when it is undersized, too dark, too bright,
 or has low Laplacian variance. It does not claim that a garment is present;
 that requires the planned segmentation stage.
+
+Fit and save the real runtime thresholds from the first 30 captured units;
+their sharpness and brightness are measured after normalization to a fixed
+maximum side. The API requires this artifact instead of silently using guessed
+defaults.
+
+```bash
+python ml/scripts/check_quality.py \
+  --image-root /absolute/path/to/returnguard-images --shot-type all \
+  --fit-first-units 30 --fit-out ml/checkpoints/quality-policy.json
+```
 
 ## Multi-view evidence
 
@@ -119,12 +139,16 @@ Those are evidence values for later validation calibration, not a return verdict
 
 After training, fit the decision policy on validation garments only. The script
 compares every rider set to every packing set in the validation split, then
-creates a strict MATCH threshold, a strict DIFFERENT_PRODUCT threshold, and an
-explicit SUSPICIOUS band between them.
+creates a strict MATCH threshold, a strict DIFFERENT_UNIT threshold, and an
+explicit SUSPICIOUS band between them. It compares every validation rider set
+with every validation packing set using `unit_id` labels, writes a bootstrap
+uncertainty report beside the policy, and never touches the test split.
 
-It refuses to write a deployment policy if either strict side recognizes fewer
-than half of its own validation examples. That is a safety stop, not a result to
-work around by lowering the threshold.
+It always writes the calibration artifact and marks it `is_deployable: false`
+when the validation sample is too small or discrimination is weak. The API
+refuses to load such an artifact; this preserves the diagnostic record without
+allowing accidental deployment. By default, calibration requires at least 40
+positive and 100 negative validation comparisons.
 
 ```bash
 python ml/scripts/calibrate_decisions.py \

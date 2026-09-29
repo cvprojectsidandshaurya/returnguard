@@ -1,10 +1,11 @@
-"""Cross-domain training pairs and leakage-safe hard-negative batches.
+"""Cross-domain unit-identity pairs and leakage-safe hard-negative batches.
 
-The metadata has one row per photo.  A training example deliberately contains
-one packing shot and one rider shot of the *same physical garment*.  Batches
-contain no repeated garment IDs, so the off-diagonal entries of the InfoNCE
-matrix are valid negatives.  When possible, each batch also contains a
-different garment with the same design or lookalike group as a hard negative.
+The return decision is deliberately about the *physical unit*, not merely a
+catalogue design: a swapped identical-looking unit must not be silently
+accepted.  ``unit_id`` is therefore the identity used for positives.  Batches
+contain no repeated unit IDs, so every off-diagonal InfoNCE entry is a valid
+negative.  Different units with the same design are intentionally sampled as
+hard negatives.
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ def _clean_metadata_value(value: object) -> str:
 
 
 class CrossDomainPairDataset(Dataset[tuple[Path, Path, str]]):
-    """One deterministic packing/rider pair per garment for a given epoch."""
+    """One deterministic packing/rider pair per physical unit for an epoch."""
 
     def __init__(
         self,
@@ -48,40 +49,42 @@ class CrossDomainPairDataset(Dataset[tuple[Path, Path, str]]):
         self.attributes: dict[str, dict[str, str]] = {}
 
         for row in rows.itertuples(index=False):
-            garment_id = str(row.garment_id)
-            self._paths[garment_id][str(row.shot_type)].append(str(row.relative_path))
+            unit_id = _clean_metadata_value(row.unit_id)
+            if not unit_id:
+                raise ValueError("unit_id must be populated for unit-identity training")
+            self._paths[unit_id][str(row.shot_type)].append(str(row.relative_path))
             self.attributes.setdefault(
-                garment_id,
+                unit_id,
                 {
                     "design_id": _clean_metadata_value(row.design_id),
                     "lookalike_group": _clean_metadata_value(row.lookalike_group),
                 },
             )
 
-        self.garment_ids = sorted(
-            garment_id
-            for garment_id, sides in self._paths.items()
+        self.unit_ids = sorted(
+            unit_id
+            for unit_id, sides in self._paths.items()
             if sides["packing"] and sides["rider"]
         )
-        if not self.garment_ids:
-            raise ValueError(f"split {split!r} has no garments with both packing and rider photos")
+        if not self.unit_ids:
+            raise ValueError(f"split {split!r} has no units with both packing and rider photos")
 
     def set_epoch(self, epoch: int) -> None:
         self.epoch = epoch
 
     def __len__(self) -> int:
-        return len(self.garment_ids)
+        return len(self.unit_ids)
 
     def __getitem__(self, index: int) -> tuple[Path, Path, str]:
-        garment_id = self.garment_ids[index]
-        sides = self._paths[garment_id]
-        packing = sides["packing"][_stable_int(self.seed, self.epoch, garment_id, "packing") % len(sides["packing"])]
-        rider = sides["rider"][_stable_int(self.seed, self.epoch, garment_id, "rider") % len(sides["rider"])]
-        return self.image_root / packing, self.image_root / rider, garment_id
+        unit_id = self.unit_ids[index]
+        sides = self._paths[unit_id]
+        packing = sides["packing"][_stable_int(self.seed, self.epoch, unit_id, "packing") % len(sides["packing"])]
+        rider = sides["rider"][_stable_int(self.seed, self.epoch, unit_id, "rider") % len(sides["rider"])]
+        return self.image_root / packing, self.image_root / rider, unit_id
 
 
 class HardNegativeBatchSampler(Sampler[list[int]]):
-    """Build unique-garment batches, prioritising design and lookalike negatives."""
+    """Build unique-unit batches, prioritising design and lookalike negatives."""
 
     def __init__(
         self,
@@ -102,8 +105,8 @@ class HardNegativeBatchSampler(Sampler[list[int]]):
     def _build_hard_neighbors(self) -> dict[int, set[int]]:
         by_design: dict[str, set[int]] = defaultdict(set)
         by_lookalike: dict[str, set[int]] = defaultdict(set)
-        for index, garment_id in enumerate(self.dataset.garment_ids):
-            attrs = self.dataset.attributes[garment_id]
+        for index, unit_id in enumerate(self.dataset.unit_ids):
+            attrs = self.dataset.attributes[unit_id]
             if attrs["design_id"]:
                 by_design[attrs["design_id"]].add(index)
             if attrs["lookalike_group"]:
@@ -162,7 +165,7 @@ def assert_image_paths_exist(dataset: CrossDomainPairDataset) -> None:
 
 
 def load_metadata(path: Path) -> pd.DataFrame:
-    required = {"garment_id", "design_id", "lookalike_group", "shot_type", "relative_path", "split"}
+    required = {"garment_id", "unit_id", "design_id", "lookalike_group", "shot_type", "relative_path", "split"}
     df = pd.read_csv(path, dtype=str, keep_default_na=False, na_values=[""])
     missing = sorted(required - set(df.columns))
     if missing:
