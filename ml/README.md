@@ -58,16 +58,17 @@ Run metadata validation and the frozen baselines first. Training uses one
 packing photo and one rider photo for each physical garment in a batch. It
 learns a shared embedding with symmetric InfoNCE: the diagonal is the positive
 pair and all off-diagonal entries are negatives. ReturnGuard's current identity
-policy is explicitly **physical unit**: `unit_id` is the positive identity, and
-different units with an identical `design_id` are intentional hard negatives.
-The sampler keeps unit IDs unique within a batch and, whenever the data permits,
-places an identical design or lookalike in the same batch as a hard negative.
+policy is explicit: `--identity-policy product` (the default) groups positives
+by `design_id`; `--identity-policy unit` groups positives by the globally unique
+physical `garment_id`. `unit_id` is only an ordinal within a design and is never
+used as a global identity. Unit training treats identical designs as hard
+negatives, while product training uses only lookalikes as hard negatives.
 
 ```bash
 python ml/scripts/validate_metadata.py
 python ml/scripts/train_metric.py \
   --image-root /absolute/path/to/returnguard-images \
-  --backbone dinov2_base --epochs 20 --batch-size 16
+  --backbone dinov2_base --epochs 20 --batch-size 16 --identity-policy product
 ```
 
 The script uses only the train split for optimisation. Each epoch reports
@@ -80,7 +81,7 @@ runs the exact same held-out protocol against the selected checkpoint:
 ```bash
 python ml/scripts/eval_zero_shot.py \
   --image-root /absolute/path/to/returnguard-images \
-  --checkpoint ml/checkpoints/best.pt --split test
+  --checkpoint ml/checkpoints/best.pt --identity-policy product --split test
 ```
 
 ## Capture-quality gate
@@ -137,12 +138,13 @@ Those are evidence values for later validation calibration, not a return verdict
 
 ## Calibrate deployment decisions
 
-After training, fit the decision policy on validation garments only. The script
-compares every rider set to every packing set in the validation split, then
-creates a strict MATCH threshold, a strict DIFFERENT_UNIT threshold, and an
-explicit SUSPICIOUS band between them. It compares every validation rider set
-with every validation packing set using `unit_id` labels, writes a bootstrap
-uncertainty report beside the policy, and never touches the test split.
+After training, fit a decision policy on validation data only. The script
+compares every rider shot to every packing set in the validation split, creating
+several deploy-shaped trials per identity before it fits strict MATCH and
+DIFFERENT_PRODUCT/DIFFERENT_UNIT thresholds with an explicit SUSPICIOUS band.
+Choose the same identity policy used for training and held-out evaluation. The
+script writes a bootstrap uncertainty report beside the policy and never touches
+the test split.
 
 It always writes the calibration artifact and marks it `is_deployable: false`
 when the validation sample is too small or discrimination is weak. The API
@@ -154,7 +156,7 @@ positive and 100 negative validation comparisons.
 python ml/scripts/calibrate_decisions.py \
   --image-root /absolute/path/to/returnguard-images \
   --checkpoint ml/checkpoints/best.pt \
-  --out ml/checkpoints/policy.json
+  --identity-policy product --out ml/checkpoints/policy.json
 ```
 
 The resulting `policy.json` must ship with the exact checkpoint that produced

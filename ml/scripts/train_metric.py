@@ -32,6 +32,7 @@ from src.training_data import (  # noqa: E402
     CrossDomainPairDataset,
     HardNegativeBatchSampler,
     assert_image_paths_exist,
+    identity_column,
     load_metadata,
 )
 
@@ -88,16 +89,17 @@ def validation_loss(model, loader, device: str, temperature: float) -> float:
 
 
 @torch.no_grad()
-def validation_retrieval(model, metadata, image_root: Path, device: str, batch_size: int) -> dict[str, float]:
-    """Measure deploy-shaped unit retrieval on validation data each epoch."""
+def validation_retrieval(model, metadata, image_root: Path, device: str, batch_size: int, identity_policy: str) -> dict[str, float]:
+    """Measure deploy-shaped product or unit retrieval on validation data each epoch."""
     val = metadata[metadata["split"] == "val"]
+    identity_key = identity_column(identity_policy)
     packing = val[val["shot_type"] == "packing"].reset_index(drop=True)
     rider = val[val["shot_type"] == "rider"].reset_index(drop=True)
-    units = sorted(packing["unit_id"].unique())
-    unit_to_index = {unit: index for index, unit in enumerate(units)}
-    rider = rider[rider["unit_id"].isin(unit_to_index)].reset_index(drop=True)
-    if not units or rider.empty:
-        raise ValueError("validation retrieval needs packing and rider images for at least one unit")
+    identities = sorted(packing[identity_key].unique())
+    identity_to_index = {identity: index for index, identity in enumerate(identities)}
+    rider = rider[rider[identity_key].isin(identity_to_index)].reset_index(drop=True)
+    if not identities or rider.empty:
+        raise ValueError(f"validation retrieval needs packing and rider images for at least one {identity_policy} identity")
 
     def encode(paths: list[Path]) -> np.ndarray:
         vectors: list[np.ndarray] = []
@@ -114,12 +116,12 @@ def validation_retrieval(model, metadata, image_root: Path, device: str, batch_s
     gallery = encode([image_root / path for path in packing["relative_path"]])
     queries = encode([image_root / path for path in rider["relative_path"]])
     similarities = queries @ gallery.T
-    gallery_units = packing["unit_id"].map(unit_to_index).to_numpy()
-    scores = np.full((len(queries), len(units)), -np.inf, dtype=np.float32)
-    for unit_index in range(len(units)):
-        columns = np.where(gallery_units == unit_index)[0]
-        scores[:, unit_index] = similarities[:, columns].max(axis=1)
-    correct = rider["unit_id"].map(unit_to_index).to_numpy()
+    gallery_identities = packing[identity_key].map(identity_to_index).to_numpy()
+    scores = np.full((len(queries), len(identities)), -np.inf, dtype=np.float32)
+    for identity_index in range(len(identities)):
+        columns = np.where(gallery_identities == identity_index)[0]
+        scores[:, identity_index] = similarities[:, columns].max(axis=1)
+    correct = rider[identity_key].map(identity_to_index).to_numpy()
     result = recall_at_k(scores, correct, ks=(1, 5))
     labels = np.zeros_like(scores, dtype=np.int8)
     labels[np.arange(len(correct)), correct] = 1
@@ -143,6 +145,7 @@ def main() -> int:
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--temperature", type=float, default=0.07)
+    parser.add_argument("--identity-policy", choices=("product", "unit"), default="product")
     parser.add_argument("--selection-metric", choices=("recall_at_1", "tpr_at_1pct_fpr"), default="recall_at_1")
     parser.add_argument("--seed", type=int, default=13)
     parser.add_argument("--device", default="auto")
@@ -156,8 +159,8 @@ def main() -> int:
     metadata_path = Path(args.metadata)
     df = load_metadata(metadata_path)
     image_root = Path(args.image_root)
-    train_data = CrossDomainPairDataset(df, image_root, split="train", seed=args.seed)
-    val_data = CrossDomainPairDataset(df, image_root, split="val", seed=args.seed)
+    train_data = CrossDomainPairDataset(df, image_root, split="train", seed=args.seed, identity_policy=args.identity_policy)
+    val_data = CrossDomainPairDataset(df, image_root, split="val", seed=args.seed, identity_policy=args.identity_policy)
     if len(train_data) < args.batch_size or len(val_data) < 2:
         raise ValueError("need at least batch-size train garments and two validation garments with both shot types")
     assert_image_paths_exist(train_data)
@@ -178,9 +181,9 @@ def main() -> int:
         **vars(args),
         "device": device,
         "metadata_sha256_12": metadata_digest(metadata_path),
-        "identity_policy": "unit",
-        "train_units": len(train_data),
-        "val_units": len(val_data),
+        "identity_policy": args.identity_policy,
+        "train_identities": len(train_data),
+        "val_identities": len(val_data),
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
     print(json.dumps(run, sort_keys=True))
@@ -200,7 +203,7 @@ def main() -> int:
             losses.append(float(loss.item()))
 
         val = validation_loss(model, val_loader, device, args.temperature)
-        retrieval = validation_retrieval(model, df, image_root, device, args.batch_size)
+        retrieval = validation_retrieval(model, df, image_root, device, args.batch_size, args.identity_policy)
         selection = retrieval[args.selection_metric]
         if not np.isfinite(selection):
             raise ValueError(f"validation {args.selection_metric} is not finite; inspect the validation split")

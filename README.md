@@ -1,6 +1,6 @@
 # ReturnGuard
 
-Computer vision verification for ecommerce returns in India. The seller photographs a garment at packing. The delivery rider photographs it at the doorstep during the existing reverse pickup QC step. Our model verifies a physical `unit_id` and reports MATCH, DIFFERENT_UNIT, SUSPICIOUS, RETAKE, or REFERENCE_INVALID.
+Computer vision verification for ecommerce returns in India. The seller photographs a garment at packing. The delivery rider photographs it at the doorstep during the existing reverse pickup QC step. The model separately evaluates product identity (`design_id`) and physical-unit identity (`garment_id`), then reports MATCH, DIFFERENT_PRODUCT or DIFFERENT_UNIT, SUSPICIOUS, RETAKE, or REFERENCE_INVALID.
 
 The research problem is the domain gap: clean flat lay packing shots against crumpled, glare covered, motion blurred rider photos taken on cheap Android phones.
 

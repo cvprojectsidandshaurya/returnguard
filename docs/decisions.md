@@ -75,3 +75,16 @@ not a silent dependency, because it needs a data-backed accuracy and latency
 comparison first. `mean_rider_score` is the default global evidence field; the
 InfoNCE temperature is 0.07 and the last two DINO blocks are trainable unless a
 recorded validation experiment changes those defaults.
+
+### 2026-10-07 Product and unit pipelines are separate; `unit_id` is not a key
+
+The earlier unit-only decision is superseded. `unit_id` is merely an ordinal
+within a `design_id` (for example, every design may have units 1–3), so it is
+not globally unique. Product experiments use `design_id` for positives and
+physical-unit experiments use globally unique `garment_id`. Each policy is
+trained, calibrated, and evaluated separately; product matching is the default
+shippable task, while unit matching remains an honest, harder experiment.
+
+Calibration now scores each rider shot against each candidate packing set. This
+creates multiple validation trials per identity and retains bootstrap intervals
+for threshold uncertainty. It is deliberately still validation-only.

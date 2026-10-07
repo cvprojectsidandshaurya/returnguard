@@ -42,7 +42,7 @@ There is no real versus fake label and the model never learns fraud. Every image
 
 Negatives are not collected or uploaded. In a batch of B pairs, the diagonal of the similarity matrix is the B positives and every off diagonal cell is a negative, so a batch of 64 yields 4,032 negatives for free (InfoNCE). What matters is which negatives appear: random ones go stale within an epoch, so the sampler forces hard ones into every batch using `design_id` and `lookalike_group`. That is why the protocol requires buying two or three identical units of the same design.
 
-The MATCH, SUSPICIOUS, DIFFERENT_UNIT, RETAKE decision is not part of training. Training produces a score for physical-unit identity. Thresholds are fitted on validation-set comparisons only, with a suspicious band between strict decisions; held-out test evaluation is separate.
+The MATCH, SUSPICIOUS, DIFFERENT_PRODUCT/DIFFERENT_UNIT, RETAKE decision is not part of training. Training produces separate scores for product (`design_id`) and physical-unit (`garment_id`) identity. Thresholds are fitted on validation-set comparisons only, with a suspicious band between strict decisions; held-out test evaluation is separate.
 
 ## Rules that are easy to break by accident
 

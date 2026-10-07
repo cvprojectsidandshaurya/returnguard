@@ -18,10 +18,16 @@ def _rows(unit_id: str, design_id: str) -> list[dict]:
     ]
 
 
-def test_same_design_units_are_explicit_hard_negatives():
+def test_same_design_physical_garments_are_unit_hard_negatives():
     data = pd.DataFrame(_rows("u-1", "d-1") + _rows("u-2", "d-1") + _rows("u-3", "d-2"))
-    dataset = CrossDomainPairDataset(data, Path("/images"), split="train")
+    dataset = CrossDomainPairDataset(data, Path("/images"), split="train", identity_policy="unit")
     sampler = HardNegativeBatchSampler(dataset, batch_size=2, seed=13, drop_last=True)
-    first, second = dataset.unit_ids.index("u-1"), dataset.unit_ids.index("u-2")
+    first, second = dataset.identity_ids.index("g-u-1"), dataset.identity_ids.index("g-u-2")
     assert second in sampler._hard_neighbors[first]
     assert first in sampler._hard_neighbors[second]
+
+
+def test_product_identity_groups_same_design_without_using_local_unit_number():
+    data = pd.DataFrame(_rows("1", "d-1") + _rows("1", "d-2"))
+    dataset = CrossDomainPairDataset(data, Path("/images"), split="train", identity_policy="product")
+    assert dataset.identity_ids == ["d-1", "d-2"]
