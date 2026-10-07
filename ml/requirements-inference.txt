@@ -1,0 +1,8 @@
+# Runtime-only dependencies for the API image.  Keep notebooks, plotting, and
+# test tooling in requirements.txt so deployment stays smaller and headless.
+torch>=2.4
+torchvision>=0.19
+numpy>=1.26,<3
+pillow>=10.3
+opencv-python-headless>=4.10
+transformers>=4.44

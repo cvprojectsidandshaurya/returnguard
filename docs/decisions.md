@@ -40,3 +40,51 @@ Sid owns the capture protocol, the dataset, `metadata.csv`, the split tooling, t
 The point is that the person reporting a result is not the person who tuned the model that produced it. When a model author also owns the eval script, thresholds drift toward whatever makes the current checkpoint look good, usually without anyone intending it. Keeping the split means an improvement has to survive a measurement neither author controls.
 
 Practical consequence: changes to `ml/src/metrics.py`, `ml/src/splits.py`, `ml/scripts/validate_metadata.py` and `docs/results.md` are Sid's call, and changes to training and backbone code are Shaurya's. Both still go through pull request review by the other.
+
+### 2026-09-28 Physical-unit identity is the V1 return target
+
+ReturnGuard verifies a physical `unit_id`, not just a catalogue `design_id`.
+Two copies of the same design are therefore hard negatives: accepting a swapped
+identical unit would defeat the use case. Training positives, validation labels,
+retrieval evaluation, and deployed decision thresholds all use `unit_id`.
+The API calls a low-confidence non-match `DIFFERENT_UNIT`; it reserves `RETAKE`
+for a bad rider capture and `REFERENCE_INVALID` for a bad seller reference.
+
+### 2026-09-28 Deploy only validation-calibrated, test-evaluated checkpoints
+
+Every training epoch records validation Recall@1 and TPR@1% FPR and selects a
+checkpoint with a declared retrieval metric rather than contrastive loss alone.
+Calibration is validation-only, emits bootstrap uncertainty bounds, and records
+whether it is deployable. The API refuses a non-deployable policy. The held-out
+test evaluation runs separately with the selected checkpoint and is never used
+to tune training or thresholds.
+
+### 2026-09-28 Inference uses bounded, headless local evidence
+
+The inference service accepts at most 8 packing and 12 rider photos, moves CPU
+verification off the async event loop, and uses a runtime-only dependency set
+with headless OpenCV. ORB descriptors are extracted once per image rather than
+once per candidate pair. Quality measurements are normalized to a common maximum
+side before thresholds are fitted from validation photos.
+
+### 2026-09-28 ORB is a bounded V1 local-evidence baseline
+
+ORB plus RANSAC is retained as optional, interpretable local evidence for tags,
+logos, prints, and embroidery. SuperPoint/LightGlue remains the next benchmark,
+not a silent dependency, because it needs a data-backed accuracy and latency
+comparison first. `mean_rider_score` is the default global evidence field; the
+InfoNCE temperature is 0.07 and the last two DINO blocks are trainable unless a
+recorded validation experiment changes those defaults.
+
+### 2026-10-07 Product and unit pipelines are separate; `unit_id` is not a key
+
+The earlier unit-only decision is superseded. `unit_id` is merely an ordinal
+within a `design_id` (for example, every design may have units 1–3), so it is
+not globally unique. Product experiments use `design_id` for positives and
+physical-unit experiments use globally unique `garment_id`. Each policy is
+trained, calibrated, and evaluated separately; product matching is the default
+shippable task, while unit matching remains an honest, harder experiment.
+
+Calibration now scores each rider shot against each candidate packing set. This
+creates multiple validation trials per identity and retains bootstrap intervals
+for threshold uncertainty. It is deliberately still validation-only.
